@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Resistencia comercial más próxima</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #eef2f7;
+      margin: 0;
+      padding: 20px;
+    }
+    .tarjeta {
+      max-width: 520px;
+      margin: 30px auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
+      overflow: hidden;
+    }
+    h1 {
+      margin: 0;
+      padding: 18px;
+      background: #1f3a5f;
+      color: white;
+      font-size: 22px;
+      text-align: center;
+    }
+    .contenido { padding: 20px; }
+    label { display: block; margin-top: 12px; font-weight: bold; color: #333; }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      margin-top: 6px;
+      font-size: 16px;
+      border: 1px solid #aab;
+      border-radius: 6px;
+      box-sizing: border-box;
+    }
+    button {
+      width: 100%;
+      margin-top: 18px;
+      padding: 12px;
+      font-size: 17px;
+      color: white;
+      background: #2e7d32;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover { background: #256528; }
+    .resultado {
+      margin-top: 12px;
+      padding: 12px;
+      background: #f5f7fa;
+      border-left: 5px solid #1f3a5f;
+      border-radius: 6px;
+    }
+    .resultado.mejor { border-left-color: #2e7d32; background: #e8f5e9; }
+    .error { color: #555; font-size: 14px; }
+    .ayuda { font-size: 13px; color: #666; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="tarjeta">
+    <h1>Calculadora de resistencias</h1>
+    <div class="contenido">
+      <label for="valor">Valor deseado (Ω)</label>
+      <input type="text" id="valor" value="3.5k">
+      <div class="ayuda">Ejemplos: 4700, 4.7k, 2.2M</div>
+
+      <label for="tolerancia">Tolerancia</label>
+      <select id="tolerancia">
+        <option value="10">10% (serie E12)</option>
+        <option value="1">1% (serie E96)</option>
+      </select>
+
+      <button onclick="calcular()">Calcular</button>
+      <div id="salida"></div>
+    </div>
+  </div>
+
+  <script>
+    const E12 = [1.0, 1.2, 1.5, 1.8, 2.2, 2.7, 3.3, 3.9, 4.7, 5.6, 6.8, 8.2];
+    const E96 = [];
+    for (let i = 0; i < 96; i++) {
+      E96.push(Number(Math.pow(10, i / 96).toFixed(2)));
+    }
+
+    function valoresComerciales(tolerancia, minimo, maximo) {
+      const base = tolerancia === 10 ? E12 : E96;
+      const lista = [];
+      for (let decada = 0; decada <= 6; decada++) {
+        for (const b of base) {
+          const v = Number((b * Math.pow(10, decada)).toFixed(2));
+          if (v >= minimo && v <= maximo) lista.push(v);
+        }
+      }
+      return lista;
+    }
+
+    function formato(v) {
+      if (v >= 1e6) return Number((v / 1e6).toPrecision(4)) + "MΩ";
+      if (v >= 1e3) return Number((v / 1e3).toPrecision(4)) + "kΩ";
+      return Number(v.toPrecision(4)) + "Ω";
+    }
+
+    function leerValor(texto) {
+      texto = texto.trim().toLowerCase().replace("ω", "").replace("ohm", "").replace(/\s/g, "");
+      let mult = 1;
+      if (texto.endsWith("k")) { mult = 1e3; texto = texto.slice(0, -1); }
+      else if (texto.endsWith("m")) { mult = 1e6; texto = texto.slice(0, -1); }
+      return parseFloat(texto) * mult;
+    }
+
+    function paralelo(a, b) { return (a * b) / (a + b); }
+
+    function calcular() {
+      const objetivo = leerValor(document.getElementById("valor").value);
+      const tolerancia = Number(document.getElementById("tolerancia").value);
+      const salida = document.getElementById("salida");
+
+      if (isNaN(objetivo) || objetivo <= 0) {
+        salida.innerHTML = '<div class="resultado">Escribe un valor válido, por ejemplo 4.7k</div>';
+        return;
+      }
+
+      const k = tolerancia === 10 ? 10 : 4;
+      const v = valoresComerciales(tolerancia, objetivo / k, objetivo * k);
+
+      let mejores = [];
+
+      function probar(total, descripcion) {
+        const error = Math.abs(total - objetivo) / objetivo * 100;
+        if (mejores.length === 5 && error >= mejores[4].error) return;
+        if (mejores.some(m => m.descripcion === descripcion)) return;
+        mejores.push({ total, descripcion, error });
+        mejores.sort((a, b) => a.error - b.error);
+        mejores = mejores.slice(0, 5);
+      }
+
+      for (let i = 0; i < v.length; i++) {
+        const a = v[i];
+        probar(a, formato(a));
+
+        for (let j = i; j < v.length; j++) {
+          const b = v[j];
+          probar(a + b, `${formato(a)} + ${formato(b)}`);
+          probar(paralelo(a, b), `${formato(a)} || ${formato(b)}`);
+
+          for (let m = j; m < v.length; m++) {
+            const c = v[m];
+            probar(a + b + c, `${formato(a)} + ${formato(b)} + ${formato(c)}`);
+            probar(1 / (1 / a + 1 / b + 1 / c), `${formato(a)} || ${formato(b)} || ${formato(c)}`);
+
+            const grupos = [[a, b, c], [b, a, c], [c, a, b]];
+            for (const [x, y, z] of grupos) {
+              probar(x + paralelo(y, z), `${formato(x)} + (${formato(y)} || ${formato(z)})`);
+              probar(paralelo(x, y + z), `${formato(x)} || (${formato(y)} + ${formato(z)})`);
+            }
+          }
+        }
+      }
+
+      let html = `<h3>Objetivo: ${formato(objetivo)} (tolerancia ${tolerancia}%)</h3>`;
+      mejores.forEach((m, i) => {
+        html += `<div class="resultado ${i === 0 ? "mejor" : ""}">
+          <b>${i + 1}. ${m.descripcion}</b><br>
+          = ${formato(m.total)} <span class="error">(error ${m.error.toFixed(3)}%)</span>
+        </div>`;
+      });
+      salida.innerHTML = html;
+    }
+  </script>
+</body>
+</html>
